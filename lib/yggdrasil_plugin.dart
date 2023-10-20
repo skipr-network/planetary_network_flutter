@@ -8,7 +8,7 @@ typedef void onReportIpFnc(String ip);
 class YggdrasilPlugin {
 
   MethodChannel _channel =  const MethodChannel('yggdrasil_plugin');
-  onReportIpFnc _reportFnc;
+  late onReportIpFnc _reportFnc;
   static final YggdrasilPlugin _singleton = YggdrasilPlugin._internal();
 
   init(){

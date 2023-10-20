@@ -18,6 +18,6 @@ void main() {
   });
 
   test('getPlatformVersion', () async {
-    expect(await YggdrasilPlugin.platformVersion, '42');
+    expect(await YggdrasilPlugin().platformVersion, '42');
   });
 }
