@@ -1,212 +1,171 @@
 //
-//  PacketTunnelProvider.swift
-//  VPNExtension
+//  ConfigurationProxy.swift
+//  YggdrasilNetwork
 //
-//  Created by Mochamad Nizwar Syafuan on 31/12/21.
+//  Created by Neil Alexander on 07/01/2019.
 //
 
+import UIKit
+import Yggdrasil
 import NetworkExtension
-import OpenVPNAdapter
-import os.log
 
-extension NEPacketTunnelFlow: OpenVPNAdapterPacketFlow {}
+class ConfigurationProxy {
 
-class PacketTunnelProvider: NEPacketTunnelProvider {
+    private var json: Data? = nil
+    private var dict: [String: Any]? = nil
     
-    lazy var vpnAdapter: OpenVPNAdapter = {
-        let adapter = OpenVPNAdapter()
-        adapter.delegate = self
-        return adapter
-    }()
-    
-    let vpnReachability = OpenVPNReachability()
-    var providerManager: NETunnelProviderManager!
-    
-    var startHandler: ((Error?) -> Void)?
-    var stopHandler: (() -> Void)?
-    var groupIdentifier: String?
-    
-    static var connectionIndex = 0;
-    static var timeOutEnabled = true;
-    
-    func loadProviderManager(completion:@escaping (_ error : Error?) -> Void)  {
-        NETunnelProviderManager.loadAllFromPreferences { (managers, error)  in
-            if error == nil {
-                self.providerManager = managers?.first ?? NETunnelProviderManager()
-                completion(nil)
-            } else {
-                completion(error)
-            }
-        }
-    }
-    
-    override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        guard
-            let protocolConfiguration = protocolConfiguration as? NETunnelProviderProtocol,
-            let providerConfiguration = protocolConfiguration.providerConfiguration
-        else {
-            fatalError()
-        }
-        guard let ovpnFileContent: Data = providerConfiguration["config"] as? Data else {
-            fatalError()
-        }
-        
-        guard let groupIdentifier: Data = providerConfiguration["groupIdentifier"] as? Data else{
-            fatalError()
-        }
-        self.groupIdentifier = String(decoding: groupIdentifier, as: UTF8.self)
-                    
-        let configuration = OpenVPNConfiguration()
-        configuration.fileContent = ovpnFileContent
-        configuration.tunPersist = false
-        
-        // Apply OpenVPN configuration.
-        let properties: OpenVPNConfigurationEvaluation
+    init() {
+        self.json = MobileGenerateConfigJSON()
         do {
-            properties = try vpnAdapter.apply(configuration: configuration)
+            try self.convertToDict()
         } catch {
-            completionHandler(error)
-            return
+            NSLog("ConfigurationProxy: Error deserialising JSON (\(error))")
+        }
+        self.fix()
+    }
+    
+    init(json: Data) throws {
+        self.json = json
+        try self.convertToDict()
+        self.fix()
+    }
+    
+    private func fix() {
+        self.set("AdminListen", to: "none")
+        self.set("IfName", to: "none")
+        self.set("IfMTU", to: 65535)
+                
+        if self.get("AutoStart") == nil {
+            self.set("AutoStart", to: ["WiFi": false, "Mobile": false] as [String: Bool])
         }
         
-        if !properties.autologin {
-            guard let username = options?["username"] as? String, let password = options?["password"] as? String else {
-                fatalError()
-            }
-            let credentials = OpenVPNCredentials()
-            credentials.username = username
-            credentials.password = password
-            do {
-                try vpnAdapter.provide(credentials: credentials)
-            } catch {
-                completionHandler(error)
-                return
-            }
-        }
-        
-        vpnReachability.startTracking { [weak self] status in
-            guard status == .reachableViaWiFi else { return }
-            self?.vpnAdapter.reconnect(afterTimeInterval: 5)
-        }
-        startHandler = completionHandler
-        vpnAdapter.connect(using: packetFlow)
-    }
-    
-    @objc func stopVPN() {
-        loadProviderManager { (err :Error?) in
-            if err == nil {
-                self.providerManager.connection.stopVPNTunnel();
-            }
+        let interfaces = self.get("MulticastInterfaces") as? [String] ?? []
+        if interfaces.contains(where: { $0 == "lo0" }) {
+            self.add("lo0", in: "MulticastInterfaces")
         }
     }
     
-    override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
-        stopHandler = completionHandler
-        if vpnReachability.isTracking {
-            vpnReachability.stopTracking()
+    func get(_ key: String) -> Any? {
+        if let dict = self.dict {
+            if dict.keys.contains(key) {
+                return dict[key]
+            }
         }
-        vpnAdapter.disconnect()
+        return nil
     }
     
-    override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
-        if String(data: messageData, encoding: .utf8) == "OPENVPN_STATS" {
-            var toSave = ""
-            let formatter = DateFormatter();
-            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss";
-            toSave += UserDefaults.init(suiteName: groupIdentifier)?.string(forKey: "connected_on") ?? ""
-            toSave+="_"
-            toSave += String(vpnAdapter.interfaceStatistics.packetsIn)
-            toSave+="_"
-            toSave += String(vpnAdapter.interfaceStatistics.packetsOut)
-            toSave+="_"
-            toSave += String(vpnAdapter.interfaceStatistics.bytesIn)
-            toSave+="_"
-            toSave += String(vpnAdapter.interfaceStatistics.bytesOut)
-            UserDefaults.init(suiteName: groupIdentifier)?.setValue(toSave, forKey: "connectionUpdate")
+    func get(_ key: String, inSection section: String) -> Any? {
+        if let dict = self.get(section) as? [String: Any] {
+            if dict.keys.contains(key) {
+                return dict[key]
+            }
+        }
+        return nil
+    }
+    
+    func add(_ value: Any, in key: String) {
+        if self.dict != nil {
+            if self.dict![key] as? [Any] != nil {
+                var temp = self.dict![key] as? [Any] ?? []
+                temp.append(value)
+                self.dict!.updateValue(temp, forKey: key)
+            }
         }
     }
-}
+    
+    func remove(_ value: String, from key: String) {
+        if self.dict != nil {
+            if self.dict![key] as? [String] != nil {
+                var temp = self.dict![key] as? [String] ?? []
+                if let index = temp.firstIndex(of: value) {
+                    temp.remove(at: index)
+                }
+                self.dict!.updateValue(temp, forKey: key)
+            }
+        }
+    }
+    
+    func remove(index: Int, from key: String) {
+        if self.dict != nil {
+            if self.dict![key] as? [Any] != nil {
+                var temp = self.dict![key] as? [Any] ?? []
+                temp.remove(at: index)
+                self.dict!.updateValue(temp, forKey: key)
+            }
+        }
+    }
+    
+    func set(_ key: String, to value: Any) {
+        if self.dict != nil {
+            self.dict![key] = value
+        }
+    }
+    
+    func set(_ key: String, inSection section: String, to value: Any?) {
+        if self.dict != nil {
+            if self.dict!.keys.contains(section), let value = value {
+                var temp = self.dict![section] as? [String: Any] ?? [:]
+                temp.updateValue(value, forKey: key)
+                self.dict!.updateValue(temp, forKey: section)
+            }
+        }
+    }
+    
+    func data() -> Data? {
+        do {
+            try self.convertToJson()
+            return self.json
+        } catch {
+            return nil
+        }
+    }
+    
+    func save(to manager: inout NETunnelProviderManager) throws {
+        self.fix()
+        if let data = self.data() {
+            let providerProtocol = NETunnelProviderProtocol()
+            providerProtocol.providerBundleIdentifier = "org.jimber.yggdrasil.extension"
+            providerProtocol.providerConfiguration = [ "json": data ]
+            providerProtocol.serverAddress = "yggdrasil"
+            providerProtocol.username = self.get("EncryptionPublicKey") as? String ?? "(unknown public key)"
+            
+            let disconnectrule = NEOnDemandRuleDisconnect()
+            var rules: [NEOnDemandRule] = [disconnectrule]
 
-extension PacketTunnelProvider: OpenVPNAdapterDelegate {
-    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, configureTunnelWithNetworkSettings networkSettings: NEPacketTunnelNetworkSettings?, completionHandler: @escaping (Error?) -> Void) {
-        networkSettings?.dnsSettings?.matchDomains = [""]
-        setTunnelNetworkSettings(networkSettings, completionHandler: completionHandler)
-    }
-     
-    
-    func _updateEvent(_ event: OpenVPNAdapterEvent, openVPNAdapter: OpenVPNAdapter) {
-        var toSave = ""
-        let formatter = DateFormatter();
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss";
-        switch event {
-        case .connected:
-            toSave = "CONNECTED"
-            UserDefaults.init(suiteName: groupIdentifier)?.setValue(formatter.string(from: Date.now), forKey: "connected_on")
-            break
-        case .disconnected:
-            toSave = "DISCONNECTED"
-            break
-        case .connecting:
-            toSave = "CONNECTING"
-            break
-        case .reconnecting:
-            toSave = "RECONNECTING"
-            break
-        case .info:
-            toSave = "CONNECTED"
-            break
-        default:
-            UserDefaults.init(suiteName: groupIdentifier)?.removeObject(forKey: "connected_on")
-            toSave = "INVALID"
-        }
-        UserDefaults.init(suiteName: groupIdentifier)?.setValue(toSave, forKey: "vpnStage")
-    }
-    
-    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleEvent event: OpenVPNAdapterEvent, message: String?) {
-        PacketTunnelProvider.timeOutEnabled = true;
-        _updateEvent(event, openVPNAdapter: openVPNAdapter)
-        switch event {
-        case .connected:
-            PacketTunnelProvider.timeOutEnabled = false;
-            if reasserting {
-                reasserting = false
+            if self.get("WiFi", inSection: "AutoStart") as? Bool ?? false {
+                let wifirule = NEOnDemandRuleConnect()
+                wifirule.interfaceTypeMatch = .wiFi
+                rules.insert(wifirule, at: 0)
             }
-            guard let startHandler = startHandler else { return }
-            startHandler(nil)
-            self.startHandler = nil
-            break
-        case .disconnected:
-            PacketTunnelProvider.timeOutEnabled = false;
-            guard let stopHandler = stopHandler else { return }
-            if vpnReachability.isTracking {
-                vpnReachability.stopTracking()
+
+            if self.get("Mobile", inSection: "AutoStart") as? Bool ?? false {
+                let mobilerule = NEOnDemandRuleConnect()
+                mobilerule.interfaceTypeMatch = .cellular
+                rules.insert(mobilerule, at: 0)
             }
-            stopHandler()
-            self.stopHandler = nil
-            break
-        case .reconnecting:
-            reasserting = true
-            break
-        default:
-            break
+
+            manager.onDemandRules = rules
+            manager.isOnDemandEnabled = rules.count > 1
+            providerProtocol.disconnectOnSleep = rules.count > 1
+            
+            manager.protocolConfiguration = providerProtocol
+            
+            manager.saveToPreferences(completionHandler: { (error:Error?) in
+                if let error = error {
+                    print(error)
+                } else {
+                    print("Save successfully")
+                    NotificationCenter.default.post(name: NSNotification.Name.YggdrasilSettingsUpdated, object: self)
+                }
+            })
         }
     }
     
-    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleError error: Error) {
-        guard let fatal = (error as NSError).userInfo[OpenVPNAdapterErrorFatalKey] as? Bool, fatal == true else {
-            return
-        }
-        if vpnReachability.isTracking {
-            vpnReachability.stopTracking()
-        }
-        if let startHandler = startHandler {
-            startHandler(error)
-            self.startHandler = nil
-        } else {
-            cancelTunnelWithError(error)
-        }
+    private func convertToDict() throws {
+        self.dict = try JSONSerialization.jsonObject(with: self.json!, options: []) as? [String: Any]
     }
     
-    func openVPNAdapter(_ openVPNAdapter: OpenVPNAdapter, handleLogMessage logMessage: String) {
+    private func convertToJson() throws {
+        self.json = try JSONSerialization.data(withJSONObject: self.dict as Any, options: .prettyPrinted)
     }
 }

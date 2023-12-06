@@ -13,8 +13,6 @@
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.network.skipr.vpn.dev</string>
-		<string>group.network.skipr.vpn.production</string>
-		<string>group.network.skipr.vpn.staging</string>
 	</array>
 </dict>
 </plist>
