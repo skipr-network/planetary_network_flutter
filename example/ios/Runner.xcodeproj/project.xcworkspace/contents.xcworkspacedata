@@ -3,5 +3,8 @@
    version = "1.0">
    <FileRef
       location = "self:">
+      <SWIFT_VERSION>
+       <string>5.0</string>
+      </SWIFT_VERSION>
    </FileRef>
 </Workspace>
