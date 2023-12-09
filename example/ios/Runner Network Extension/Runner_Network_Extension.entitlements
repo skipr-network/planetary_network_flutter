@@ -12,7 +12,7 @@
 	</array>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.org.jimber.yggdrasil</string>
+		<string>group.network.skipr.vpn.dev</string>
 	</array>
 </dict>
 </plist>

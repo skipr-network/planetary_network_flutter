@@ -142,9 +142,26 @@ public class SwiftYggdrasilPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         NSLog("Yggdrasil: Notification onYggdrasilSwitchPeersUpdated received")
         self.logYggdrasilData()
     }
-    
+
     @objc func onYggdrasilSettingsUpdated(notification: NSNotification) {
-        NSLog("Yggdrasil: Notification onYggdrasilSettingsUpdated received")
-        self.logYggdrasilData()
+    NSLog("Yggdrasil: Notification onYggdrasilSettingsUpdated received")
+
+    // Log the entire notification object
+    NSLog("Notification Object: \(notification)")
+
+    // Log the userInfo dictionary if available
+    if let userInfo = notification.userInfo {
+        NSLog("User Info: \(userInfo)")
+    } else {
+        NSLog("No user info available.")
     }
+
+    // Continue with any other logging or processing you need
+    self.logYggdrasilData()
+}
+    
+    // @objc func onYggdrasilSettingsUpdated(notification: NSNotification) {
+    //     NSLog("Yggdrasil: Notification onYggdrasilSettingsUpdated received")
+    //     self.logYggdrasilData()
+    // }
 }
