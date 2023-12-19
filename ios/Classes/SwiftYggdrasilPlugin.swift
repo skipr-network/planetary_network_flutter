@@ -19,10 +19,11 @@ public class SwiftYggdrasilPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: nil, queue: nil, using: { notification in
             if let conn = notification.object as? NEVPNConnection {
                 NSLog("Yggdrasil: ConnectionStatus \(conn.status.rawValue)")
-                if (conn.status == .connected) {
+                if conn.status == .connected {
                     NSLog("Yggdrasil: Connection made")
-                    
-                    self.vpnService.makeIPCRequests()
+
+                    // Log Yggdrasil data when the connection is made
+                    self.logYggdrasilData()
                 }
             }
         })
@@ -47,26 +48,42 @@ public class SwiftYggdrasilPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        
-        if (call.method == "getPlatformVersion") {
-            result("iOS " + UIDevice.current.systemVersion)
-        } else if (call.method == "start_vpn") {
-            guard let dictionary = call.arguments as? Dictionary<String, String>,
-                  let keys = YggdrasilKeys.Create(dictionary: dictionary) else {
-                result(false)
-                return
-            }
-            
-            startVpn(with: keys) { success in
-                result(success)
-            }
-        } else if (call.method == "stop_vpn") {
-            stopVpn()
-            result(true);
-        } else {
-            result(FlutterMethodNotImplemented)
+    switch call.method {
+    case "getPlatformVersion":
+        result("iOS " + UIDevice.current.systemVersion)
+
+    case "start_vpn":
+        guard let dictionary = call.arguments as? Dictionary<String, String>,
+              let keys = YggdrasilKeys.Create(dictionary: dictionary) else {
+            result(false)
+            return
         }
+
+        // Log the keys before starting the VPN
+        print("Generated Keys:")
+        print("Signing Public Key: \(keys.signingPublicKey)")
+        print("Signing Private Key: \(keys.signingPrivateKey)")
+        print("Encryption Public Key: \(keys.encryptionPublicKey)")
+        print("Encryption Private Key: \(keys.encryptionPrivateKey)")
+
+        startVpn(with: keys) { success in
+            // Log the success status after VPN starts
+            print("VPN Start Success: \(success)")
+            result(success)
+        }
+
+    case "stop_vpn":
+        stopVpn()
+        result(true)
+
+        // Log that VPN has been stopped
+        print("VPN Stopped")
+
+    default:
+        result(FlutterMethodNotImplemented)
     }
+}
+
     
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
         self.eventSink = events
@@ -113,14 +130,21 @@ public class SwiftYggdrasilPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         NSLog("Yggdrasil: Stop VPN tunnel")
         self.vpnService.stopVpnTunnel()
     }
-    
-    func logYggdrasilData() {
-        NSLog("IP Address: \(self.vpnService.yggdrasilSelfIP)")
-        NSLog("Subnet: \(self.vpnService.yggdrasilSelfSubnet)")
 
-        //var peer = String(data: try! JSONSerialization.data(withJSONObject: peer, options: .prettyPrinted), encoding: .utf8)!
+    private func logYggdrasilData() {
+    // Check if the VPN connection is established
+    guard self.vpnService.vpnManager.connection.status == .connected else {
+        NSLog("Yggdrasil: VPN not connected yet.")
+        return
     }
-    
+
+    NSLog("IP Address: \(self.vpnService.yggdrasilSelfIP ?? "N/A")")
+    NSLog("Subnet: \(self.vpnService.yggdrasilSelfSubnet ?? "N/A")")
+
+    // Notify Flutter about the IP address update
+    sendIpAddressEvent()
+}
+
     @objc func onYggdrasilSelfUpdated(notification: NSNotification) {
         NSLog("Yggdrasil: Notification onYggdrasilSelfUpdated received")
         self.logYggdrasilData()
@@ -142,26 +166,9 @@ public class SwiftYggdrasilPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         NSLog("Yggdrasil: Notification onYggdrasilSwitchPeersUpdated received")
         self.logYggdrasilData()
     }
-
-    @objc func onYggdrasilSettingsUpdated(notification: NSNotification) {
-    NSLog("Yggdrasil: Notification onYggdrasilSettingsUpdated received")
-
-    // Log the entire notification object
-    NSLog("Notification Object: \(notification)")
-
-    // Log the userInfo dictionary if available
-    if let userInfo = notification.userInfo {
-        NSLog("User Info: \(userInfo)")
-    } else {
-        NSLog("No user info available.")
-    }
-
-    // Continue with any other logging or processing you need
-    self.logYggdrasilData()
-}
     
-    // @objc func onYggdrasilSettingsUpdated(notification: NSNotification) {
-    //     NSLog("Yggdrasil: Notification onYggdrasilSettingsUpdated received")
-    //     self.logYggdrasilData()
-    // }
+    @objc func onYggdrasilSettingsUpdated(notification: NSNotification) {
+        NSLog("Yggdrasil: Notification onYggdrasilSettingsUpdated received")
+        self.logYggdrasilData()
+    }
 }

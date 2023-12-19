@@ -124,7 +124,7 @@ class ConfigurationProxy {
         self.fix()
         if let data = self.data() {
             let providerProtocol = NETunnelProviderProtocol()
-            providerProtocol.providerBundleIdentifier = "org.jimber.yggdrasil.extension"
+            providerProtocol.providerBundleIdentifier = "network.skipr.vpn.test.extension"
             providerProtocol.providerConfiguration = [ "json": data ]
             providerProtocol.serverAddress = "yggdrasil"
             providerProtocol.username = self.get("EncryptionPublicKey") as? String ?? "(unknown public key)"
